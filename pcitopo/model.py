@@ -59,6 +59,7 @@ class Device:
     warnings: list[str] = field(default_factory=list)  # the two sources disagreed
     problems: list[str] = field(default_factory=list)  # something could not be read
     real_path: Path | None = None  # where the sysfs symlink pointed: the kernel's nesting
+    name_hint: str = ""  # a name the source resolved, for when pci.ids cannot
 
     # --- identity, decoded bytes preferred, attribute files as the fallback ---
 
@@ -198,6 +199,7 @@ def build_device(sysfs_dev: SysfsDevice) -> Device:
         attrs=dict(sysfs_dev.attrs),
         problems=problems,
         real_path=sysfs_dev.real_path,
+        name_hint=sysfs_dev.name_hint,
     )
 
     # Subsystem IDs live in the header only for Type 0 (spec 7.5.1.2.3). For a bridge the

@@ -6,3 +6,7 @@ dist/
 *.egg-info/
 .venv/
 pci-capture/
+
+# Generated viewer/diagram output
+topo.html
+topo.dot

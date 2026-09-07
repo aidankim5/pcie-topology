@@ -82,6 +82,18 @@ class PciIds:
             name = BUILTIN_DEVICES.get((vendor_id, device_id))
         return name if name else f"{device_id:04x}"
 
+    def knows_device(self, vendor_id: int, device_id: int) -> bool:
+        """True when a real name exists for this pair, rather than a hex fallback.
+
+        device_name() always returns something printable, which makes it
+        impossible for a caller to tell a name from a formatted number. This is
+        the question a caller has to ask before falling back to another source.
+        """
+        return bool(
+            self.devices.get((vendor_id, device_id))
+            or BUILTIN_DEVICES.get((vendor_id, device_id))
+        )
+
     def full_name(self, vendor_id: int, device_id: int) -> str:
         """The name the way lspci says it: vendor first, then device."""
         return f"{self.vendor_name(vendor_id)} {self.device_name(vendor_id, device_id)}"

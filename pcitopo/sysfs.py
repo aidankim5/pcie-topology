@@ -141,6 +141,9 @@ class SysfsDevice:
     attrs: dict[str, int | None] = field(default_factory=dict)
     config: bytes = b""
     problems: list[str] = field(default_factory=list)
+    # A name the source already resolved, used only when no pci.ids can name the
+    # device. Empty for a live sysfs read: the kernel publishes IDs, not names.
+    name_hint: str = ""
 
     @property
     def config_bytes_read(self) -> int:

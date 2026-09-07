@@ -21,6 +21,7 @@ import json
 
 from .ids import PciIds
 from .model import Device
+from .render import display_name
 from .topology import Node, Topology
 
 
@@ -44,6 +45,7 @@ def device_dict(dev: Device, ids: PciIds) -> dict:
         "device_name": ids.device_name(vendor_id, device_id)
         if vendor_id is not None and device_id is not None
         else None,
+        "display_name": display_name(dev, ids),
         "revision": dev.revision,
         "class_code": dev.class_code,
         "class_name": None,
@@ -178,13 +180,7 @@ def _dot_id(dev: Device) -> str:
 
 def _dot_label(dev: Device, ids: PciIds) -> str:
     """The text inside a node: address, name, class, link. One fact per line."""
-    vendor_id, device_id = dev.vendor_id, dev.device_id
-    name = (
-        ids.full_name(vendor_id, device_id)
-        if vendor_id is not None and device_id is not None
-        else "identity unreadable"
-    )
-    lines = [str(dev.address), name]
+    lines = [str(dev.address), display_name(dev, ids)]
 
     triple = dev.class_triple
     if triple is not None:

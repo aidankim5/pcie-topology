@@ -10,6 +10,8 @@ It writes two fixture trees and copies the lspci answer keys:
     tests/fixtures/sysfs-capture-raptorlake-noroot/  the same, config truncated to 64
     tests/fixtures/dumps/lspci-tv-capture.txt        `lspci -tv`, the tree answer key
     tests/fixtures/dumps/lspci-nn-capture.txt        `lspci -nn`, the identity answer key
+    tests/fixtures/dumps/lspci-full-capture.txt      `lspci -vvv -xxxx`, the same machine
+                                                     recorded a second way
 
 The truncated copy is not a convenience. A non-root read of `config` returns
 exactly 64 bytes (see config_space.py), so cutting the files to 64 reproduces
@@ -74,6 +76,9 @@ def import_capture(capture: Path) -> None:
     for src_name, dst_name in (
         ("lspci-tv.txt", "lspci-tv-capture.txt"),
         ("lspci-nn.txt", "lspci-nn-capture.txt"),
+        # The -vvv -xxxx dump is a second recording of the same machine, and
+        # tests/test_lspci.py parses it back and compares against the sysfs bytes.
+        ("lspci-full.txt", "lspci-full-capture.txt"),
     ):
         src = capture / src_name
         if src.exists():

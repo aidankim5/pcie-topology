@@ -14,6 +14,26 @@ from .topology import Node, Topology
 LAYOUT_TAGS = {0: "T0", 1: "T1"}
 
 
+def display_name(dev: Device, ids: PciIds) -> str:
+    """The best name available for a device, and where it comes from.
+
+    Order: pci.ids, then whatever the source already resolved (lspci prints
+    names, so a dump carries them), then the raw hex IDs. The middle step
+    matters on a machine with no pci.ids installed -- most Windows machines --
+    where a stranger's dump would otherwise render as a tree of hex.
+    """
+    vendor_id, device_id = dev.vendor_id, dev.device_id
+    if vendor_id is None or device_id is None:
+        return "identity unreadable"
+    if not dev.present:
+        return "no function present (all ones)"
+    if ids.knows_device(vendor_id, device_id):
+        return ids.full_name(vendor_id, device_id)
+    if dev.name_hint:
+        return dev.name_hint
+    return ids.full_name(vendor_id, device_id)
+
+
 def layout_tag(dev: Device) -> str:
     """"T0", "T1", plus "+MF" when the Multi-Function bit is set (0Eh bit 7)."""
     if dev.header is None:
@@ -45,13 +65,8 @@ def format_table(headers: list[str], rows: list[list[str]]) -> list[str]:
 def device_row(dev: Device, ids: PciIds) -> list[str]:
     """One device as the cells of a `list` table row."""
     vendor_id, device_id = dev.vendor_id, dev.device_id
-    if vendor_id is None or device_id is None:
-        ident, name = "????:????", "identity unreadable"
-    elif not dev.present:
-        ident, name = f"{vendor_id:04x}:{device_id:04x}", "no function present (all ones)"
-    else:
-        ident = f"{vendor_id:04x}:{device_id:04x}"
-        name = ids.full_name(vendor_id, device_id)
+    ident = "????:????" if vendor_id is None or device_id is None else f"{vendor_id:04x}:{device_id:04x}"
+    name = display_name(dev, ids)
 
     triple = dev.class_triple
     if triple is None:
@@ -316,14 +331,7 @@ BLANK = "   "
 
 def node_headline(dev: Device, ids: PciIds) -> str:
     """The first line of a node: address, what it is, and what it is called."""
-    vendor_id, device_id = dev.vendor_id, dev.device_id
-    if vendor_id is None or device_id is None:
-        name = "identity unreadable"
-    elif not dev.present:
-        name = "no function present"
-    else:
-        name = ids.full_name(vendor_id, device_id)
-
+    name = display_name(dev, ids)
     parts = [f"[{dev.address}]", dev.port_type_name]
     if dev.bridge and not dev.bridge.unconfigured:
         parts.append(dev.bridge.range_text)
@@ -430,8 +438,7 @@ def render_degraded(devices: list[Device], ids: PciIds) -> list[str]:
     for dev in devices:
         if not dev.degraded:
             continue
-        vendor_id, device_id = dev.vendor_id, dev.device_id
-        name = ids.full_name(vendor_id, device_id) if vendor_id and device_id else "?"
+        name = display_name(dev, ids)
         rows.append(
             [
                 str(dev.address),

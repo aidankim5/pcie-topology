@@ -1,10 +1,16 @@
 """Command line.
 
-Three verbs, which are the three questions the tool answers:
+Four verbs, which are the four questions the tool answers:
 
     list    every PCI function, flat, with its identity fields
     buses   every Type 1 header and the bus numbers it carries, checked
     tree    the topology assembled from those bus numbers, annotated
+    serve   the same tree in a browser, with a Python process behind it
+
+Every verb reads from one of two sources, and they are interchangeable because
+both end as a `Scan`: the live `/sys` (or a captured copy of it, via
+--sysfs-root), or a saved `lspci -vvv -xxxx` dump (via --lspci). The second is
+what makes the tool usable on a machine that is not the one being inspected.
 
 `list` and `buses` are not scaffolding left over from building `tree`. They are
 the two halves of it shown separately, and they are what you reach for when the
@@ -22,9 +28,12 @@ Exit codes (a choice, not spec, and the same ones the decoder repo uses):
 import argparse
 import sys
 
+from pathlib import Path
+
 from . import __version__
 from .export import to_dot, to_json
 from .ids import PciIds
+from .lspci import NotAnLspciDump, scan_from_lspci
 from .model import build_devices
 from .render import (
     render_access_note,
@@ -37,8 +46,10 @@ from .render import (
     render_topology_warnings,
     render_tree,
 )
+from .server import serve, write_html
 from .sysfs import DEFAULT_SYSFS_ROOT, SysfsUnavailable, scan
 from .topology import build_topology, cross_check
+from .webui import build_payload
 
 OK, BAD_INPUT, NOT_YET = 0, 1, 3  # 2 is taken by argparse
 
@@ -55,7 +66,19 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True, metavar="COMMAND")
 
     def add_common(sp: argparse.ArgumentParser) -> None:
-        sp.add_argument(
+        # Mutually exclusive: a run reads one machine, from one source. Letting both
+        # through would raise the question of which wins, and there is no good answer.
+        source = sp.add_mutually_exclusive_group()
+        source.add_argument(
+            "--lspci",
+            metavar="FILE",
+            help=(
+                "read a saved `sudo lspci -vvv -xxxx` dump instead of sysfs. The hex rows "
+                "in it are the same bytes sysfs would hand over, so everything works the "
+                "same way -- on any machine, with no hardware present."
+            ),
+        )
+        source.add_argument(
             "--sysfs-root",
             default=DEFAULT_SYSFS_ROOT,
             metavar="PATH",
@@ -122,12 +145,53 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit the topology as JSON on stdout instead of drawing it",
     )
     tree.add_argument(
+        "--html",
+        metavar="FILE",
+        help=(
+            "write a self-contained HTML viewer to FILE: the tree, clickable, with every "
+            "decoded field per device. One file, no server, opens in any browser."
+        ),
+    )
+    tree.add_argument(
         "--dot",
         metavar="FILE",
         help=(
             "write a Graphviz DOT block diagram to FILE ('-' for stdout). "
             "Render it with: dot -Tsvg FILE -o topo.svg"
         ),
+    )
+    srv = sub.add_parser(
+        "serve",
+        help="the viewer in a browser, with live re-scan and drag-and-drop decoding",
+        description=(
+            "Serve the visual topology viewer from a local HTTP server. Unlike the "
+            "standalone --html file, this one can re-scan the hardware on demand and can "
+            "decode an lspci dump dropped onto the page, because Python is still running "
+            "behind it."
+        ),
+    )
+    add_common(srv)
+    srv.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        metavar="N",
+        help="port to listen on (default: %(default)s). 0 asks the OS for any free port.",
+    )
+    srv.add_argument(
+        "--host",
+        default="127.0.0.1",
+        metavar="ADDR",
+        help=(
+            "address to bind (default: %(default)s, this machine only). Setting anything "
+            "else exposes your hardware inventory to the network, and this server has no "
+            "authentication of any kind."
+        ),
+    )
+    srv.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="do not open a browser window; just print the URL",
     )
     return p
 
@@ -138,7 +202,26 @@ def load_ids(path: str | None) -> PciIds:
 
 
 def _scan_or_fail(args: argparse.Namespace):
-    """The read every command starts with. Returns None after printing why it failed."""
+    """The read every command starts with. Returns None after printing why it failed.
+
+    Both branches return a `Scan`, so nothing downstream has to know which one ran.
+    That is the whole reason lspci.py returns one too.
+    """
+    if getattr(args, "lspci", None):
+        path = Path(args.lspci)
+        try:
+            # errors="replace" because one bad byte in a large dump should cost that
+            # character, not the capture.
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            print(f"pcitopo: cannot read {path}: {exc.strerror}", file=sys.stderr)
+            return None
+        try:
+            return scan_from_lspci(text, source=str(path))
+        except NotAnLspciDump as exc:
+            print(f"pcitopo: {path}: {exc}", file=sys.stderr)
+            return None
+
     try:
         return scan(args.sysfs_root)
     except SysfsUnavailable as exc:
@@ -203,6 +286,13 @@ def cmd_tree(args: argparse.Namespace) -> int:
     topo = build_topology(devices)
     cross_check(topo, devices)
 
+    if args.html:
+        payload = build_payload(topo, ids, result, devices, source=str(result.devices_dir))
+        write_html(payload, args.html)
+        print(f"Wrote {args.html}. Open it in any browser; no server needed.")
+        if not args.json and not args.degraded and not args.dot:
+            return OK
+
     # --dot writes a file (or stdout) and is independent of what else is printed, so
     # it runs first and does not suppress the tree unless --json also asked for quiet.
     if args.dot:
@@ -241,6 +331,34 @@ def cmd_tree(args: argparse.Namespace) -> int:
     return OK
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    # Fail fast on an unreadable source rather than serving a page that cannot work.
+    # An lspci dump is loaded once here and becomes the page's starting topology.
+    if getattr(args, "lspci", None):
+        result = _scan_or_fail(args)
+        if result is None:
+            return BAD_INPUT
+
+    if args.host != "127.0.0.1":
+        print(
+            f"pcitopo: binding {args.host}, which is reachable from the network. "
+            "This server has no authentication and reports your hardware in detail.",
+            file=sys.stderr,
+        )
+
+    try:
+        return serve(
+            sysfs_root=args.sysfs_root,
+            ids=load_ids(args.ids),
+            host=args.host,
+            port=args.port,
+            open_browser=not args.no_browser,
+        )
+    except OSError as exc:
+        print(f"pcitopo: cannot listen on {args.host}:{args.port}: {exc}", file=sys.stderr)
+        return BAD_INPUT
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.cmd == "list":
@@ -249,4 +367,6 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_buses(args)
     if args.cmd == "tree":
         return cmd_tree(args)
+    if args.cmd == "serve":
+        return cmd_serve(args)
     return NOT_YET  # unreachable: argparse rejects any other command first

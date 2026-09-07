@@ -26,6 +26,49 @@ Domain 0000  (root bus 00)
 │                     16 GT/s x4 (max 16 GT/s x4)
 ```
 
+## The visual tool
+
+Two ways to get a clickable tree, depending on whether Python is still running
+behind the page.
+
+**One file, no server.** Writes a self-contained HTML page — the tree, every
+decoded field per device, filtering, search — that opens in any browser on any
+OS, with nothing to install and nothing loaded from the network.
+
+```bash
+python3 -m pcitopo tree --html topo.html
+```
+
+**Served, for a live machine.** Adds a Re-scan button and, more usefully, lets
+you drag a `sudo lspci -vvv -xxxx` dump onto the page and have it decoded.
+
+```bash
+python3 -m pcitopo serve            # opens http://127.0.0.1:8765/
+```
+
+It binds to localhost only. The page reports your hardware in detail and the
+server has no authentication, so `--host` is available but warns you.
+
+### Why drag-and-drop takes an lspci dump
+
+`lspci -x` prints the raw bytes underneath everything it decoded, and those hex
+rows are the same bytes `/sys/.../config` hands over. So a dump *is* a capture,
+and the tool can read one from a machine it has never seen:
+
+```bash
+python3 -m pcitopo tree  --lspci someone-elses-dump.txt
+python3 -m pcitopo tree  --lspci someone-elses-dump.txt --html theirs.html
+```
+
+Anyone can post a dump; almost nobody can hand over a tarball of sysfs. That is
+what makes the viewer useful to someone other than the person who ran it.
+
+**The browser never decodes anything.** A second decoder written in JavaScript
+would be a second set of answers, and there would be no way to tell which was
+right when they disagreed. So Python decodes and the page draws. A standalone
+page handed a file it cannot draw says which command turns it into one it can,
+rather than guessing.
+
 ## Install and run
 
 There is nothing to install. Clone it and run the module.
@@ -37,6 +80,7 @@ cd pcie-topology
 python3 -m pcitopo list      # every function, flat, with identity fields
 python3 -m pcitopo buses     # every bridge's bus numbers, with consistency checks
 python3 -m pcitopo tree      # the topology, annotated
+python3 -m pcitopo serve     # the same, in a browser
 
 sudo python3 -m pcitopo tree # the same, plus link speed and width
 ```
@@ -53,6 +97,8 @@ python3 -m pcitopo tree --sysfs-root tests/fixtures/sysfs-capture-raptorlake-nor
 | Flag | What it does |
 | --- | --- |
 | `--sysfs-root PATH` | read a captured tree instead of the live `/sys` |
+| `--lspci FILE` | read a saved `lspci -vvv -xxxx` dump instead of sysfs |
+| `--html FILE` | write the self-contained visual viewer |
 | `--ids PATH` | use a specific `pci.ids` file for vendor and device names |
 | `-v`, `--verbose` | add BARs, bridge forwarding windows and the capability chain |
 | `--degraded` | list only links running below their maximum |
@@ -210,6 +256,9 @@ already understood going in.
 - 64-bit BARs consuming the register after them
 - extended capabilities at `0x100` and the packed 32-bit header
 - PCI domains, and why every bus lookup has to be keyed on `(domain, bus)`
+- that an `lspci -x` hex dump is a *capture*, interchangeable with sysfs bytes
+- that configuration space is live state: read the same register twice and a
+  counter will have moved
 
 Every module docstring cites the spec section it implements and marks anything
 that is the tool's decision rather than the standard's as *"choice, not spec"*.
@@ -229,6 +278,9 @@ that is the tool's decision rather than the standard's as *"choice, not spec"*.
 | `topology.py` | builds the tree, then cross-checks it against sysfs nesting |
 | `render.py` | text output. Nothing here decodes |
 | `export.py` | JSON and DOT, as renderers over the same objects |
+| `lspci.py` | reads an `lspci -vvv -xxxx` dump back into configuration space |
+| `webui.py` | the self-contained HTML viewer, a third renderer over the same objects |
+| `server.py` | `serve`: three routes on stdlib `http.server` |
 | `cli.py` | argparse |
 
 ## Tests
@@ -237,7 +289,7 @@ that is the tool's decision rather than the standard's as *"choice, not spec"*.
 python3 -m unittest discover
 ```
 
-161 tests, no hardware and no third-party packages required.
+206 tests, no hardware and no third-party packages required.
 
 The suite is anchored to something independent wherever it can be. Identity is
 checked field by field against `lspci -nn`, and the bridge bus numbers against
@@ -246,6 +298,16 @@ The two fixture trees are that one capture at two privilege levels, which lets
 the tests *prove* the claim above rather than assert it: the tree built from
 64-byte reads is identical to the tree built from full ones, and the link
 annotations are the only thing that disappears.
+
+The same boot also produced an `lspci -vvv -xxxx` dump, so the lspci parser is
+held to reproducing the sysfs bytes. It does, with one instructive exception
+the tests document: the two recordings are **not** identical byte for byte.
+Configuration space is live hardware state, not a file. `capture.sh` copies
+sysfs first and runs lspci seconds later, so free-running counters deep in
+extended capability space hold different values in the two. Every
+configuration header is identical, and so is every register this tool decodes
+— which is the assertion worth making, and a good reminder of what these bytes
+actually are.
 
 See `tests/fixtures/README.md` for what is real in the fixtures and what is
 synthesized.
