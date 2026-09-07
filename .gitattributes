@@ -1,0 +1,6 @@
+# Source and docs: stored LF, checked out LF on every OS (Python and lspci text are LF-native).
+* text=auto eol=lf
+
+# Fixtures are evidence: never convert their bytes. The sysfs fixture trees contain
+# real binary `config` images, which any line-ending conversion would corrupt.
+tests/fixtures/** -text
