@@ -10,3 +10,4 @@ pci-capture/
 # Generated viewer/diagram output
 topo.html
 topo.dot
+topo.json
