@@ -129,6 +129,48 @@ class TestPageGeneration(unittest.TestCase):
         self.assertEqual(parsed["meta"]["source"], 'a </script> and a "quote"')
 
 
+class TestFamilyTreeLayout(unittest.TestCase):
+    """The drawing is a nested <ul>/<li>, and the connectors are CSS on it.
+
+    These are string checks against generated text, which is shallow, but each
+    one pins a rule that was wrong at some point and would be wrong silently:
+    a stem drawn above the top card, or a scrollbar that lies about the width.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.page = render_page(payload(), served=False)
+
+    def test_the_top_card_has_no_connector_above_it(self):
+        # The root complex is an only-child <li>, so without this rule it inherits
+        # the only-child stem and grows a line out of its top into empty space.
+        self.assertIn(".branch.top > li::before, .branch.top > li::after { display: none; }", self.page)
+
+    def test_the_last_child_keeps_its_stem_but_drops_the_bar(self):
+        # Removing the whole border would take the vertical stem with it and leave
+        # the rightmost card floating unattached.
+        self.assertIn(".branch > li:last-child::after { border-top: 0; }", self.page)
+
+    def test_an_only_child_gets_a_straight_stem_not_a_bar(self):
+        self.assertIn(".branch > li:only-child::before { display: none; }", self.page)
+
+    def test_collapsing_hides_a_whole_subtree(self):
+        self.assertIn("li.collapsed > .branch { display: none; }", self.page)
+
+    def test_zoom_reflows_rather_than_repainting(self):
+        # A CSS transform is applied after layout, so the scroll area would keep the
+        # unscaled width and the scrollbars would not match what is drawn. The
+        # assertion is on the script, not the stylesheet: the stylesheet mentions
+        # transforms in a comment and in unrelated rules (.twist centres itself).
+        self.assertIn("#stage { zoom: 1; }", self.page)
+        self.assertIn('$("#stage").style.zoom = zoom;', self.page)
+        self.assertNotIn('$("#stage").style.transform', self.page)
+
+    def test_the_script_builds_nested_lists(self):
+        self.assertIn('branch.className = "branch"', self.page)
+        self.assertIn('createElement("li")', self.page)
+
+
 class TestServer(unittest.TestCase):
     """Real requests over a real socket, on a port the OS picks."""
 
