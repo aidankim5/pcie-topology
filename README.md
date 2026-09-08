@@ -28,8 +28,26 @@ Domain 0000  (root bus 00)
 
 ## The visual tool
 
-Two ways to get a clickable tree, depending on whether Python is still running
-behind the page.
+The page draws the hierarchy as a **family tree**: the root complex at the top,
+every device in a card below its parent, joined by drawn connectors, with
+click-to-inspect, filtering and search. The shape is the point. It is the same
+parent/child relation `topology.py` derives from Secondary Bus Numbers, and
+seeing a card sit *under* a root port is seeing what that register means — which
+an indented list, the first thing this drew, does not give you.
+
+The layout is CSS rather than computed geometry. Each subtree is a `<ul>` of
+`<li>` cards and the connectors are borders on pseudo-elements, so the browser's
+own flexbox centring does the positioning: no layout maths to get wrong, and
+nothing to recompute when a branch is collapsed.
+
+The root complex gets a card of its own even though it is not a PCI function.
+Nothing forwards to bus 0 — the root complex presents it directly — so on real
+hardware every device on bus 0 is a sibling with no parent. Drawing them as
+orphaned stumps would be true but unreadable, so the one thing that does sit
+above them gets drawn. `lspci` makes the same call with its `-[0000:00]-` prefix.
+
+Two ways to get that page, depending on whether Python is still running behind
+it.
 
 **One file, no server.** Writes a self-contained HTML page — the tree, every
 decoded field per device, filtering, search — that opens in any browser on any
@@ -279,7 +297,7 @@ that is the tool's decision rather than the standard's as *"choice, not spec"*.
 | `render.py` | text output. Nothing here decodes |
 | `export.py` | JSON and DOT, as renderers over the same objects |
 | `lspci.py` | reads an `lspci -vvv -xxxx` dump back into configuration space |
-| `webui.py` | the self-contained HTML viewer, a third renderer over the same objects |
+| `webui.py` | the self-contained HTML viewer — the family-tree drawing, a third renderer over the same objects |
 | `server.py` | `serve`: three routes on stdlib `http.server` |
 | `cli.py` | argparse |
 
