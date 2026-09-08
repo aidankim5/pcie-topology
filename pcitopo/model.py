@@ -22,6 +22,17 @@ read from disappearing out of the tree entirely.
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .bars import Bar, Window, decode_bars, decode_windows
+from .bridges import Type1Header, decode_type1_header
+from .capabilities import (
+    Capability,
+    ExtendedCapability,
+    PcieCapability,
+    decode_pcie_capability,
+    find_pcie_capability,
+    walk_capabilities,
+    walk_extended_capabilities,
+)
 from .config_space import ConfigSpace
 from .header import CommonHeader, decode_common_header, subsystem_ids
 from .sysfs import Address, Scan, SysfsDevice
@@ -37,6 +48,12 @@ class Device:
     address: Address
     config: ConfigSpace
     header: CommonHeader | None  # None when configuration space could not be read
+    bridge: Type1Header | None = None  # the bus numbers at 18h-1Ah, Type 1 headers only
+    bars: list[Bar] = field(default_factory=list)  # 10h upward, layout-dependent
+    windows: list[Window] = field(default_factory=list)  # bridge forwarding ranges
+    caps: list[Capability] = field(default_factory=list)  # the chain from 34h, root only
+    ext_caps: list[ExtendedCapability] = field(default_factory=list)  # from 100h, ECAM only
+    pcie: PcieCapability | None = None  # capability 10h, where link speed lives
     attrs: dict[str, int | None] = field(default_factory=dict)
     subsystem: tuple[int, int] | None = None  # (vendor, device), when the device reports one
     warnings: list[str] = field(default_factory=list)  # the two sources disagreed
@@ -82,6 +99,47 @@ class Device:
     def is_bridge(self) -> bool:
         """Type 1 header layout. Unknown configuration space is not a bridge."""
         return bool(self.header and self.header.is_bridge)
+
+    # --- topology, which only a Type 1 header carries ---
+
+    @property
+    def secondary_bus(self) -> int | None:
+        """The bus immediately below this bridge (19h), or None if this is not a bridge.
+
+        The single most useful number in the tool: stage 3 builds the tree by
+        matching every device's own bus against this.
+        """
+        return self.bridge.secondary_bus if self.bridge else None
+
+    @property
+    def subordinate_bus(self) -> int | None:
+        """The highest bus number below this bridge (1Ah), or None if not a bridge."""
+        return self.bridge.subordinate_bus if self.bridge else None
+
+    def claims_bus(self, bus: int) -> bool:
+        """True when `bus` falls in this bridge's [secondary, subordinate] range."""
+        return bool(self.bridge and self.bridge.claims(bus))
+
+    # --- the PCI Express capability, which needs a privileged read to reach ---
+
+    @property
+    def port_type_name(self) -> str:
+        """"Root Port", "Endpoint", ... or a plain description when 10h was not readable."""
+        if self.pcie:
+            return self.pcie.port_type_name
+        if self.header is None:
+            return "unknown"
+        return "PCI bridge" if self.is_bridge else "PCI function"
+
+    @property
+    def link_text(self) -> str:
+        """"16 GT/s x16 (max 16 GT/s x16)", or empty when there is no link to describe."""
+        return self.pcie.link_text if self.pcie else ""
+
+    @property
+    def degraded(self) -> bool:
+        """The link trained below what the port supports. The finding worth surfacing."""
+        return bool(self.pcie and self.pcie.degraded)
 
     @property
     def multi_function(self) -> bool:
@@ -144,6 +202,39 @@ def build_device(sysfs_dev: SysfsDevice) -> Device:
 
     # Subsystem IDs live in the header only for Type 0 (spec 7.5.1.2.3). For a bridge the
     # kernel gets them from a capability out past the header, so take its word for those.
+    # The bus numbers exist only in the Type 1 layout; on a Type 0 endpoint the same
+    # offsets are BARs 2 and 3, so reading them here would be reading an address as a
+    # bus number. The Header Type byte at 0Eh is what makes this safe to ask.
+    if header is not None and header.is_bridge:
+        dev.bridge = decode_type1_header(cs)
+        if dev.bridge is None:
+            dev.problems.append(
+                "Type 1 header, but 18h-1Ah was outside the bytes that could be read; "
+                "no bus numbers for this bridge"
+            )
+
+    # BARs and, for a bridge, the forwarding windows. Both live inside the 64-byte
+    # header, so both survive an unprivileged read.
+    if header is not None:
+        dev.bars = decode_bars(cs, header.header_layout)
+        dev.windows = decode_windows(cs, header.header_layout)
+
+    # The capability chain, which does NOT survive one: every capability sits at 40h or
+    # above and an unprivileged read stops at 40h exactly. walk_capabilities says so in
+    # its own words rather than returning a silently short list.
+    if header is not None:
+        dev.caps, cap_problems = walk_capabilities(cs, header.has_capabilities_list)
+        # A chain running past the end of an unprivileged read is the expected outcome,
+        # not a problem worth one warning per device: render_access_note explains it
+        # once for the whole scan. A chain truncated in a read that DID reach past 40h
+        # is a genuine anomaly, so those are still reported.
+        if not cs.header_only:
+            dev.problems.extend(cap_problems)
+        pcie_cap = find_pcie_capability(dev.caps)
+        if pcie_cap is not None:
+            dev.pcie = decode_pcie_capability(cs, pcie_cap)
+        dev.ext_caps = walk_extended_capabilities(cs)
+
     if header is not None:
         dev.subsystem = subsystem_ids(cs, header.header_layout)
     if dev.subsystem is None:

@@ -1,0 +1,22 @@
+-[0000:00]-+-00.0  Intel Corporation Raptor Lake-S Host Bridge/DRAM Controller
+           +-01.0-[01]--+-00.0  NVIDIA Corporation GA104 [GeForce RTX 3060 Ti Lite Hash Rate]
+           |            \-00.1  NVIDIA Corporation GA104 High Definition Audio Controller
+           +-06.0-[02]----00.0  Samsung Electronics Co Ltd NVMe SSD Controller S4LV008[Pascal]
+           +-0a.0  Intel Corporation Raptor Lake Crashlog and Telemetry
+           +-0e.0  Intel Corporation RST Volume Management Device Controller
+           +-14.0  Intel Corporation Raptor Lake USB 3.2 Gen 2x2 (20 Gb/s) XHCI Host Controller
+           +-14.2  Intel Corporation Raptor Lake PCH Shared SRAM
+           +-15.0  Intel Corporation Raptor Lake Serial IO I2C Host Controller #0
+           +-15.1  Intel Corporation Raptor Lake Serial IO I2C Host Controller #1
+           +-15.2  Intel Corporation Raptor Lake Serial IO I2C Host Controller #2
+           +-16.0  Intel Corporation Raptor Lake CSME HECI #1
+           +-17.0  Intel Corporation Raptor Lake SATA AHCI Controller
+           +-1a.0-[03]----00.0  Seagate Technology PLC FireCuda 520/IronWolf 525 SSD
+           +-1b.0-[04]--
+           +-1c.0-[05]----00.0  Intel Corporation Wi-Fi 7(802.11be) AX1775*/AX1790*/BE20*/BE401/BE1750* 2x2
+           +-1c.3-[06]----00.0  Intel Corporation Ethernet Controller I226-V
+           +-1d.0-[07]--
+           +-1f.0  Intel Corporation Z790 Chipset LPC/eSPI Controller
+           +-1f.3  Intel Corporation Raptor Lake High Definition Audio Controller
+           +-1f.4  Intel Corporation 700 Series Chipset SMBus Controller
+           \-1f.5  Intel Corporation Raptor Lake SPI (flash) Controller
